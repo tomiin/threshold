@@ -1,0 +1,293 @@
+pragma language_version >= 0.23;
+
+import CompactStandardLibrary;
+
+// =============================================================================
+// THRESHOLD  --  prove you are allowed in, without saying who you are
+// -----------------------------------------------------------------------------
+// Age- and eligibility-gating for places people CHOOSE to go (gambling, adult
+// platforms) rather than places they NEED (banks, wages).
+//
+// Today, checking whether someone may enter means collecting their identity:
+// upload a passport to an age-check vendor, hand a casino your licence so it can
+// screen you against a self-exclusion register. One question gets answered by
+// disclosing a hundred facts, and every operator ends up holding a breach waiting
+// to happen.
+//
+// Threshold answers the question instead of disclosing the person:
+//
+//     "attested by at least TWO independent agencies, for the CURRENT period"
+//
+// The verifier receives one bit and a pseudonym that is unique to that verifier.
+// Two operators cannot compare notes to link the same human.
+//
+// SELF-EXCLUSION IS THE POINT
+// ---------------------------
+// A person can shut themselves out of EVERY participating operator at once,
+// without identifying themselves to any of them. Today, self-exclusion registers
+// require identifying every customer at the door in order to protect the few who
+// asked for help. Here the person holds the lever.
+//
+//   * They choose a duration (7 days / 30 days / 6 months / 5 years).
+//   * They may EXTEND at any time, and can never shorten it. A decision made
+//     soberly cannot be revised at 2am.
+//   * When the term expires, getting back in takes a deliberate request plus a
+//     reflection window -- it is never one click.
+//
+// HOW REVOCATION STAYS PRIVATE
+// ----------------------------
+// Checking "are you excluded?" on every proof would mean disclosing a stable
+// value each time, which would make all of a person's visits linkable. So
+// eligibility is never checked against an exclusion list at proof time.
+//
+// Instead, credentials are SHORT-LIVED: an attestation leaf binds an identity to
+// the current PERIOD (think: a day). Agencies re-attest each period, and the
+// contract simply refuses to re-attest anyone excluded. An excluded person holds
+// no valid leaf for the new period, so their proofs stop verifying everywhere --
+// with nothing disclosed about them, ever.
+//
+// Cost: exclusion takes effect at the next period rather than instantly. Benefit:
+// full unlinkability, and no on-chain signal that anyone was excluded.
+//
+// HONEST LIMITS (argued in full in the README)
+// --------------------------------------------
+//   * Self-exclusion only holds because agencies refuse to enrol a SECOND key for
+//     the same human. That means agencies keep a human -> commitment registry.
+//     Three agencies holding that is far better than ten thousand operators
+//     holding passport scans -- but it is not zero, and we do not pretend it is.
+//   * An observer can tell WHICH agencies attested a given proof (not who).
+//   * Anonymity is bounded by how many people are enrolled.
+//   * Passport data, names, and any court order live OFF-chain. On-chain there
+//     are only opaque hashes, counts, and the period.
+// =============================================================================
+
+// ---- Roles ------------------------------------------------------------------
+
+// The registry operator: advances periods. (In production this is a scheduled,
+// multi-party role; in this proof of concept, one key.)
+export sealed ledger registry: Bytes<32>;
+
+// The three independent issuing agencies.
+export ledger issuerDmv: Bytes<32>;
+export ledger issuerPassport: Bytes<32>;
+export ledger issuerFederal: Bytes<32>;
+
+// ---- Attestation state ------------------------------------------------------
+
+// One tree per agency. Leaves are opaque; membership is proven in zero knowledge.
+export ledger dmvTree: HistoricMerkleTree<10, Bytes<32>>;
+export ledger passportTree: HistoricMerkleTree<10, Bytes<32>>;
+export ledger federalTree: HistoricMerkleTree<10, Bytes<32>>;
+
+// The current period. Mixed into every leaf, so last period's attestations are
+// worthless this period.
+export ledger period: Bytes<32>;
+
+// The same period as a number, for the exclusion arithmetic below.
+export ledger periodNumber: Uint<64>;
+
+// ---- Self-exclusion state ---------------------------------------------------
+
+// identity commitment -> the earliest period at which the person may REQUEST
+// reinstatement. Being present in this map at all means "currently excluded".
+export ledger excludedUntil: Map<Bytes<32>, Uint<64>>;
+
+// identity commitment -> the period at which they actually become attestable
+// again. Set only by an explicit reinstatement request, and always in the future
+// by the reflection window.
+export ledger clearAt: Map<Bytes<32>, Uint<64>>;
+
+// ---- Verification state -----------------------------------------------------
+
+export ledger verifiedPseudonyms: Set<Bytes<32>>;
+
+export ledger attestationCount: Counter;
+export ledger verificationCount: Counter;
+export ledger exclusionCount: Counter;
+
+// ---- Policy constants -------------------------------------------------------
+// One period is intended to be one day.
+
+export pure circuit reflectionPeriods(): Uint<64> { return 7; }
+
+// Duration tiers a person may choose when excluding themselves.
+//   0 = 7 days (a break)   1 = 30 days   2 = 6 months   3 = 5 years
+export pure circuit tierPeriods(tier: Uint<8>): Uint<64> {
+  if (tier == 0) { return 7; }
+  if (tier == 1) { return 30; }
+  if (tier == 2) { return 180; }
+  return 1825;
+}
+
+// ---- Private witnesses ------------------------------------------------------
+
+witness localSecretKey(): Bytes<32>;
+
+witness dmvPath(leaf: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
+witness passportPath(leaf: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
+witness federalPath(leaf: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
+
+// ---- Identity derivation (domain-separated throughout) ----------------------
+
+export pure circuit identityCommitment(sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "thr:v1:identity"), sk]);
+}
+
+export pure circuit issuerId(sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "thr:v1:issuer"), sk]);
+}
+
+// The leaf an agency inserts: identity bound to the period it was attested in.
+export pure circuit attestationLeaf(idc: Bytes<32>, p: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>([pad(32, "thr:v1:leaf"), idc, p]);
+}
+
+// What a given verifier sees. Unique per verifier, so operators cannot collude.
+export pure circuit pseudonymFor(sk: Bytes<32>, verifierId: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<3, Bytes<32>>>([pad(32, "thr:v1:pseudonym"), sk, verifierId]);
+}
+
+export pure circuit nextPeriod(p: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "thr:v1:period"), p]);
+}
+
+// ---- Guards -----------------------------------------------------------------
+
+circuit assertRegistry(): [] {
+  assert(disclose(issuerId(localSecretKey()) == registry),
+    "Threshold: caller is not the registry operator");
+}
+
+// ---- Constructor ------------------------------------------------------------
+
+constructor(dmv: Bytes<32>, passport: Bytes<32>, federal: Bytes<32>) {
+  registry = disclose(issuerId(localSecretKey()));
+  issuerDmv = disclose(dmv);
+  issuerPassport = disclose(passport);
+  issuerFederal = disclose(federal);
+  period = pad(32, "thr:v1:genesis");
+  periodNumber = 0;
+}
+
+// ---- The clock --------------------------------------------------------------
+
+// Advance to the next period. Every outstanding attestation goes stale, and the
+// agencies re-attest everyone still in good standing. Anyone self-excluded is
+// simply not re-attested -- which is how exclusion takes effect.
+export circuit advancePeriod(): [] {
+  assertRegistry();
+  period = disclose(nextPeriod(period));
+  periodNumber = (periodNumber + 1) as Uint<64>;
+}
+
+// ---- Agency actions ---------------------------------------------------------
+
+// Attest that the human controlling `idc` is eligible, for the current period.
+// Refused while that person is self-excluded.
+export circuit attest(idc: Bytes<32>): [] {
+  const callerId = issuerId(localSecretKey());
+  const who = disclose(idc);
+
+  // Exclusion check. Present in `excludedUntil` means excluded, unless a
+  // reinstatement request has matured.
+  if (excludedUntil.member(who)) {
+    assert(clearAt.member(who),
+      "Threshold: this person is self-excluded");
+    assert(periodNumber >= clearAt.lookup(who),
+      "Threshold: reinstatement is still within the reflection window");
+  }
+
+  const leaf = attestationLeaf(who, period);
+
+  if (disclose(callerId == issuerDmv)) {
+    dmvTree.insert(disclose(leaf));
+  } else {
+    if (disclose(callerId == issuerPassport)) {
+      passportTree.insert(disclose(leaf));
+    } else {
+      assert(disclose(callerId == issuerFederal),
+        "Threshold: caller is not a registered agency");
+      federalTree.insert(disclose(leaf));
+    }
+  }
+  attestationCount.increment(1);
+}
+
+// ---- Self-exclusion (the holder's own lever) --------------------------------
+
+// Shut yourself out of every participating operator.
+//
+// `tier` picks the duration. You may call this again to EXTEND at any time; the
+// contract refuses anything that would shorten an existing exclusion.
+export circuit selfExclude(tier: Uint<8>): [] {
+  const idc = disclose(identityCommitment(localSecretKey()));
+  const until = (periodNumber + tierPeriods(disclose(tier))) as Uint<64>;
+
+  if (excludedUntil.member(idc)) {
+    assert(until > excludedUntil.lookup(idc),
+      "Threshold: an exclusion can be extended but never shortened");
+  }
+
+  excludedUntil.insert(idc, until);
+  exclusionCount.increment(1);
+}
+
+// Ask to be reinstated once the chosen term has run. This does NOT take effect
+// immediately: it schedules clearance a reflection window later, so getting back
+// in is never a single action.
+export circuit requestReinstatement(): [] {
+  const idc = disclose(identityCommitment(localSecretKey()));
+  assert(excludedUntil.member(idc), "Threshold: you are not currently excluded");
+  assert(periodNumber >= excludedUntil.lookup(idc),
+    "Threshold: your chosen exclusion period has not finished yet");
+
+  clearAt.insert(idc, (periodNumber + reflectionPeriods()) as Uint<64>);
+}
+
+// ---- Eligibility proof (what an operator relies on) -------------------------
+
+circuit dmvAttests(leaf: Bytes<32>): Boolean {
+  return dmvTree.checkRoot(disclose(merkleTreePathRoot<10, Bytes<32>>(dmvPath(leaf))));
+}
+
+circuit passportAttests(leaf: Bytes<32>): Boolean {
+  return passportTree.checkRoot(disclose(merkleTreePathRoot<10, Bytes<32>>(passportPath(leaf))));
+}
+
+circuit federalAttests(leaf: Bytes<32>): Boolean {
+  return federalTree.checkRoot(disclose(merkleTreePathRoot<10, Bytes<32>>(federalPath(leaf))));
+}
+
+// Prove eligibility to an operator.
+//
+// Proves in zero knowledge: "at least two of the three agencies attested me for
+// the current period." The operator learns that, and a pseudonym unique to them.
+// Nothing else -- not a name, not a document, not which person is acting, and
+// not whether anyone was ever excluded.
+export circuit proveEligibility(verifierId: Bytes<32>): Bytes<32> {
+  const sk = localSecretKey();
+  const leaf = attestationLeaf(identityCommitment(sk), period);
+
+  const dmvOk = dmvAttests(leaf);
+  const passportOk = passportAttests(leaf);
+  const federalOk = federalAttests(leaf);
+
+  assert((dmvOk && passportOk) || (dmvOk && federalOk) || (passportOk && federalOk),
+    "Threshold: not eligible for the current period");
+
+  const pseudonym = disclose(pseudonymFor(sk, verifierId));
+  if (!verifiedPseudonyms.member(pseudonym)) {
+    verifiedPseudonyms.insert(pseudonym);
+    verificationCount.increment(1);
+  }
+  return pseudonym;
+}
+
+// ---- Reads ------------------------------------------------------------------
+
+export circuit isVerified(pseudonym: Bytes<32>): Boolean {
+  return verifiedPseudonyms.member(disclose(pseudonym));
+}
+
+export circuit currentPeriod(): Bytes<32> { return period; }
+export circuit currentPeriodNumber(): Uint<64> { return periodNumber; }

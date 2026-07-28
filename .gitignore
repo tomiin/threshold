@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# compiled contract output (regenerate with: cd contract && npm run compact)
+managed/
+
+# runtime private-state store
+midnight-level-db/
+.dapp-state/
+
+# wallet sync checkpoints (machine-local, never secret but never useful to others)
+wallet-checkpoint*.json
+
+# os / editor
+.DS_Store
+*.log

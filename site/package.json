@@ -1,0 +1,9 @@
+{
+  "name": "threshold-site",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": { "start": "tsx server.ts" },
+  "dependencies": { "express": "^4.21.2" },
+  "devDependencies": { "tsx": "^4.19.2", "typescript": "^5.8.3" }
+}

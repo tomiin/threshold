@@ -1,0 +1,308 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Threshold — prove you're allowed in, without saying who you are</title>
+<style>
+:root{--bg:#0b0d14;--panel:#12151f;--panel2:#171b28;--line:#242938;--text:#e8eaf2;--muted:#8f96ad;--mint:#5fe3b3;--blue:#7c9cff;--amber:#ffc06b;--red:#ff7a8a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;min-height:100vh}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+/* sidebar */
+aside{width:250px;flex:none;background:var(--panel);border-right:1px solid var(--line);padding:22px 16px;display:flex;flex-direction:column;gap:22px}
+.brand{display:flex;gap:11px;align-items:center}
+.logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--mint),var(--blue));display:flex;align-items:center;justify-content:center;color:#0b0d14;font-weight:800;font-size:19px}
+.brand h1{font-size:17px;margin:0;letter-spacing:.2px}
+.brand p{margin:1px 0 0;font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:1.1px}
+.roleboxlbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+.roles{display:flex;flex-direction:column;gap:6px}
+.role{padding:11px 12px;border-radius:11px;border:1px solid var(--line);background:var(--panel2);cursor:pointer;font-size:13.5px}
+.role .r2{display:block;font-size:11.5px;color:var(--muted);margin-top:2px}
+.role.on{border-color:var(--mint);background:#10221d}
+.role.on .r2{color:#9fe8cf}
+aside .foot{margin-top:auto;font-size:11.5px;color:var(--muted);line-height:1.5}
+aside .foot button{width:100%;margin-bottom:9px}
+/* main */
+main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{border-bottom:1px solid var(--line);padding:13px 26px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--panel)}
+.day{font-size:13px;color:var(--muted)}.day b{color:var(--text);font-size:15px}
+.spacer{flex:1}
+.content{padding:26px;overflow:auto}
+button{font-size:13.5px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:9px 13px;cursor:pointer}
+button:hover{border-color:var(--blue)}button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:linear-gradient(135deg,var(--mint),#49c9a0);border:none;color:#08120e;font-weight:700}
+button.ghost{background:transparent}
+button.warn{background:#2a2013;border-color:#5a4526;color:var(--amber)}
+h2{font-size:20px;margin:0 0 3px}.lede{color:var(--muted);font-size:13.5px;margin:0 0 20px;max-width:70ch;line-height:1.55}
+.grid{display:grid;gap:14px}.g3{grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}.g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:17px}
+.card h4{margin:0 0 9px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.9px}
+.big{font-size:26px;font-weight:700}
+.hero{border-radius:16px;padding:22px;margin-bottom:18px;border:1px solid var(--line)}
+.hero.ok{background:linear-gradient(135deg,#10221d,#121a23);border-color:#2b5347}
+.hero.no{background:linear-gradient(135deg,#241419,#1a1620);border-color:#4d2b33}
+.hero.ex{background:linear-gradient(135deg,#241c10,#1c1a16);border-color:#5a4526}
+.hero .t{font-size:22px;font-weight:700;margin-bottom:5px}
+.hero .s{color:var(--muted);font-size:13.5px;line-height:1.55;max-width:68ch}
+.pill{display:inline-block;font-size:11.5px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.pill.on{color:var(--mint);border-color:#2b5347;background:#10221d}
+.pill.no{color:var(--red);border-color:#4d2b33;background:#241419}
+select{font-size:13.5px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:9px 12px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.7px;padding:8px 6px;border-bottom:1px solid var(--line)}
+td{padding:10px 6px;border-bottom:1px dashed var(--line)}
+.tiers{display:grid;gap:9px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:12px 0}
+.tier{padding:13px;border-radius:12px;border:1px solid var(--line);background:var(--panel2);cursor:pointer}
+.tier.on{border-color:var(--amber);background:#241c10}
+.tier b{display:block;font-size:15px;margin-bottom:3px}.tier span{font-size:11.5px;color:var(--muted)}
+pre{background:#0a0c13;border:1px solid var(--line);border-radius:11px;padding:13px;overflow:auto;font-size:11.5px;color:#c7cee9;margin:0}
+.log{max-height:250px;overflow:auto}
+.log div{padding:7px 0;border-bottom:1px dashed var(--line);font-size:12.5px;color:var(--muted)}
+.log b{color:var(--muted);font-weight:500;margin-right:7px}
+.log .good{color:var(--mint)}.log .bad{color:var(--red)}.log .warn{color:var(--amber)}
+.empty{color:var(--muted);font-size:13px;padding:16px 0;text-align:center}
+/* modal */
+.overlay{position:fixed;inset:0;background:rgba(5,6,10,.72);display:none;align-items:center;justify-content:center;padding:20px;z-index:50}
+.overlay.show{display:flex}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:18px;max-width:440px;width:100%;overflow:hidden}
+.modal .mh{padding:20px 22px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center}
+.modal .mh .ic{width:40px;height:40px;border-radius:11px;background:linear-gradient(135deg,var(--mint),var(--blue));flex:none}
+.modal .mb{padding:20px 22px}
+.modal h3{margin:0;font-size:16px}.modal .site{color:var(--muted);font-size:12.5px}
+.ask{margin:0 0 14px;font-size:13.5px;color:var(--muted)}
+.claims{list-style:none;padding:0;margin:0 0 16px}
+.claims li{padding:9px 0;border-bottom:1px dashed var(--line);font-size:13.5px;display:flex;gap:9px}
+.claims li .ck{color:var(--mint)}
+.wont{background:#0f1119;border:1px solid var(--line);border-radius:11px;padding:12px;font-size:12.5px;color:var(--muted);line-height:1.6;margin-bottom:16px}
+.wont b{color:var(--text)}
+.mf{display:flex;gap:9px}.mf button{flex:1;padding:11px}
+.result{margin-top:13px;padding:13px;border-radius:11px;font-size:13px;display:none}
+.result.show{display:block}.result.ok{background:#10221d;border:1px solid #2b5347;color:var(--mint)}
+.result.err{background:#241419;border:1px solid #4d2b33;color:var(--red)}
+.result .p{color:var(--text);word-break:break-all;margin-top:5px;font-size:11.5px}
+</style></head><body>
+
+<aside>
+  <div class="brand"><div class="logo">T</div><div><h1>Threshold</h1><p>Private eligibility</p></div></div>
+  <div><div class="roleboxlbl">I am a…</div><div class="roles">
+    <div class="role on" data-role="person">Individual<span class="r2">Prove I'm allowed in</span></div>
+    <div class="role" data-role="operator">Operator<span class="r2">Casino / adult platform</span></div>
+    <div class="role" data-role="agency">Agency<span class="r2">DMV, passport, federal</span></div>
+  </div></div>
+  <div class="foot">
+    <button class="ghost" id="btn-reset">Restart demo</button>
+    Running on a local Midnight node. Every action is a real contract call.
+  </div>
+</aside>
+
+<main>
+  <div class="topbar">
+    <div class="day">Day <b id="t-day">0</b></div>
+    <button id="btn-advance">Next day →</button>
+    <button id="btn-renew">Run daily renewal</button>
+    <select id="skip-n"><option value="7">skip 7 days</option><option value="30">skip 30 days</option><option value="180" selected>skip 180 days</option></select>
+    <button id="btn-skip">Skip</button>
+    <div class="spacer"></div>
+    <div class="day">Credentials last <b>1 day</b></div>
+  </div>
+  <div class="content">
+
+    <!-- INDIVIDUAL -->
+    <section class="view" id="v-person">
+      <h2>My access</h2>
+      <p class="lede">Your credential proves two agencies vouched for you today — nothing more. Sites you visit never learn your name, and can't compare notes about you.</p>
+      <div class="row" style="margin-bottom:16px"><select id="p-who"></select></div>
+      <div id="p-hero"></div>
+      <div class="grid g3" id="p-creds" style="margin-bottom:18px"></div>
+      <div class="grid g2">
+        <div class="card">
+          <h4>Prove eligibility</h4>
+          <p class="lede" style="margin-bottom:12px">Pick a site. You'll see exactly what it's asking for before anything is shared.</p>
+          <div id="p-ops" style="display:flex;gap:9px;flex-wrap:wrap"></div>
+          <div class="result" id="p-result"></div>
+        </div>
+        <div class="card" id="p-exclude"></div>
+      </div>
+    </section>
+
+    <!-- OPERATOR -->
+    <section class="view" id="v-operator" style="display:none">
+      <h2>Verifier console</h2>
+      <p class="lede">You check that a customer is allowed in, and store nothing that could identify them. There is no ID database to breach, and nothing to hand over if you're compromised.</p>
+      <div class="row" style="margin-bottom:16px"><select id="o-who"></select></div>
+      <div class="grid g3" style="margin-bottom:18px">
+        <div class="card"><h4>Verifications</h4><div class="big" id="o-count">0</div></div>
+        <div class="card"><h4>Personal data held</h4><div class="big" style="color:var(--mint)">None</div></div>
+        <div class="card"><h4>ID documents stored</h4><div class="big" style="color:var(--mint)">0</div></div>
+      </div>
+      <div class="grid g2">
+        <div class="card">
+          <h4>Customers verified</h4>
+          <table><thead><tr><th>Pseudonym (unique to you)</th><th>Day</th></tr></thead><tbody id="o-rows"></tbody></table>
+          <div style="margin-top:13px"><select id="o-sim"></select> <button class="primary" id="btn-sim">Simulate a customer arriving</button></div>
+          <div class="result" id="o-result"></div>
+        </div>
+        <div class="card">
+          <h4>Integration</h4>
+          <p class="lede" style="margin-bottom:11px">One button. No ID handling, no document storage, no vendor holding your customers' passports.</p>
+<pre>&lt;script src="https://threshold.example/v1.js"&gt;&lt;/script&gt;
+&lt;button
+  data-threshold-verify
+  data-claims="over-18,eligible"
+  data-verifier="<span id="o-key">casino</span>"&gt;
+  Verify with Threshold
+&lt;/button&gt;</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- AGENCY -->
+    <section class="view" id="v-agency" style="display:none">
+      <h2>Issuer portal</h2>
+      <p class="lede">After verifying a person the normal way — in office, with their documents — you attest that they control a key. You never publish who they are, and the contract refuses anyone who has excluded themselves.</p>
+      <div class="row" style="margin-bottom:16px"><select id="a-who"></select></div>
+      <div class="card" style="margin-bottom:18px">
+        <h4>Attest for today</h4>
+        <table><thead><tr><th>Person</th><th>Attested today by</th><th></th></tr></thead><tbody id="a-rows"></tbody></table>
+        <div class="result" id="a-result"></div>
+      </div>
+      <div class="card"><h4>Activity</h4><div class="log" id="a-log"></div></div>
+    </section>
+
+  </div>
+</main>
+
+<!-- CONSENT MODAL -->
+<div class="overlay" id="overlay"><div class="modal">
+  <div class="mh"><div class="ic"></div><div><h3 id="m-site">Royal Flush Casino</h3><div class="site" id="m-kind">Gambling</div></div></div>
+  <div class="mb">
+    <p class="ask">This site is asking you to prove:</p>
+    <ul class="claims">
+      <li><span class="ck">✓</span> You are over 18</li>
+      <li><span class="ck">✓</span> You are currently eligible to play</li>
+    </ul>
+    <div class="wont">
+      It will receive a yes or no, and a code that means nothing anywhere else.<br>
+      <b>It will not receive</b> your name, date of birth, documents, or any way to link you to another site.
+    </div>
+    <div class="mf"><button id="m-deny">Deny</button><button class="primary" id="m-approve">Approve</button></div>
+  </div>
+</div></div>
+
+<script>
+const $=id=>document.getElementById(id); let S=null, role='person', tier=2, pending=null;
+const api=async(u,o)=>{const r=await fetch(u,o);return{ok:r.ok,body:await r.json().catch(()=>({}))}};
+const post=(u,b)=>api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});
+const opt=(a,f=x=>x.id,l=x=>x.label)=>a.map(x=>`<option value="${f(x)}">${l(x)}</option>`).join('');
+const show=(id,ok,msg,extra)=>{const e=$(id);e.className='result show '+(ok?'ok':'err');e.innerHTML=msg+(extra?`<div class="p mono">${extra}</div>`:'')};
+const hide=id=>$(id).className='result';
+
+function paint(){
+  $('t-day').textContent=S.period;
+  if(!$('p-who').options.length){
+    $('p-who').innerHTML=opt(S.people); $('o-who').innerHTML=opt(S.operators);
+    $('a-who').innerHTML=opt(S.agencies); $('o-sim').innerHTML=opt(S.people);
+    $('p-ops').innerHTML=S.operators.map(o=>`<button data-op="${o.id}">Prove to ${o.label}</button>`).join('');
+    $('p-ops').querySelectorAll('[data-op]').forEach(b=>b.onclick=()=>openConsent($('p-who').value,b.dataset.op));
+  }
+  role==='person'?paintPerson():role==='operator'?paintOperator():paintAgency();
+}
+
+function paintPerson(){
+  const who=$('p-who').value, st=S.status[who];
+  const ex=st.exclusion;
+  let hero;
+  if(st.state==='excluded'){
+    const left=ex.clearIn!==null?`Reinstatement approved — you'll be able to return in ${ex.clearIn} day(s).`
+      :ex.canRequest?`Your ${ex.tierLabel} term has finished. You can request to return — it takes ${S.reflection} more days.`
+      :`${ex.periodsLeft} day(s) left of your ${ex.tierLabel} exclusion. Nothing can shorten it.`;
+    hero=`<div class="hero ex"><div class="t">You're excluded — everywhere</div><div class="s">${left}<br>No operator can see that you excluded yourself. To them you simply aren't eligible.</div></div>`;
+  } else if(st.state==='eligible'){
+    hero=`<div class="hero ok"><div class="t">You're eligible today</div><div class="s">Two agencies vouched for you for today. You can prove this to any site without revealing anything about yourself.</div></div>`;
+  } else {
+    hero=`<div class="hero no"><div class="t">Not eligible today</div><div class="s">You need at least two agencies to attest you for the current day. Credentials last one day, so they're renewed each morning.</div></div>`;
+  }
+  $('p-hero').innerHTML=hero;
+  $('p-creds').innerHTML=S.agencies.map(a=>{
+    const on=st.attested.includes(a.id);
+    return `<div class="card"><h4>${a.label}</h4><span class="pill ${on?'on':''}">${on?'attested today':'not attested'}</span></div>`;
+  }).join('');
+
+  // self-exclusion panel
+  const p=$('p-exclude');
+  if(st.state==='excluded'){
+    p.innerHTML=`<h4>Self-exclusion</h4><p class="lede" style="margin-bottom:12px">You are excluded from every participating operator.</p>
+      ${ex.canRequest?`<button class="warn" id="btn-reinstate">Request to return</button>`:`<span class="pill">locked for ${ex.periodsLeft} more day(s)</span>`}
+      <p class="lede" style="margin-top:12px">You can extend at any time.</p>
+      <div class="tiers" id="tiers"></div><button class="warn" id="btn-exclude">Extend exclusion</button>
+      <div class="result" id="p-exresult"></div>`;
+  } else {
+    p.innerHTML=`<h4>Self-exclusion</h4>
+      <p class="lede" style="margin-bottom:6px">Shut yourself out of <strong>every</strong> participating site at once. You never have to identify yourself to any of them.</p>
+      <p class="lede" style="margin-bottom:4px">Choose how long. You can always extend — you can never shorten it.</p>
+      <div class="tiers" id="tiers"></div>
+      <button class="warn" id="btn-exclude">Exclude myself</button>
+      <div class="result" id="p-exresult"></div>`;
+  }
+  const t=$('tiers');
+  t.innerHTML=S.tiers.map(x=>`<div class="tier ${x.id===tier?'on':''}" data-tier="${x.id}"><b>${x.label}</b><span>${x.blurb}</span></div>`).join('');
+  t.querySelectorAll('[data-tier]').forEach(el=>el.onclick=()=>{tier=+el.dataset.tier;paintPerson()});
+  const be=$('btn-exclude'); if(be) be.onclick=async()=>{
+    const {ok,body}=await post('/api/self-exclude',{person:who,tier});
+    S=body; show('p-exresult',ok,ok?`Done. You're excluded for ${S.tiers[tier].label}. It takes effect at tomorrow's renewal.`:body.error); paint();
+  };
+  const br=$('btn-reinstate'); if(br) br.onclick=async()=>{
+    const {ok,body}=await post('/api/request-reinstatement',{person:who});
+    S=body; show('p-exresult',ok,ok?`Requested. There's a ${S.reflection}-day reflection window before you can be attested again.`:body.error); paint();
+  };
+}
+
+function paintOperator(){
+  const op=$('o-who').value, list=S.verifications[op]||[];
+  $('o-count').textContent=list.length; $('o-key').textContent=op;
+  $('o-rows').innerHTML=list.length?list.slice().reverse().map(v=>
+    `<tr><td class="mono" style="font-size:11.5px">${v.pseudonym.slice(0,28)}…</td><td>${v.period}</td></tr>`).join('')
+    :`<tr><td colspan="2" class="empty">No verifications yet.</td></tr>`;
+}
+
+function paintAgency(){
+  const ag=$('a-who').value;
+  $('a-rows').innerHTML=S.people.map(p=>{
+    const st=S.status[p.id], done=st.attested.includes(ag);
+    return `<tr><td><strong>${p.label}</strong></td>
+      <td>${st.attested.length?st.attested.map(a=>`<span class="pill on">${a}</span>`).join(' '):'<span class="pill">none</span>'}</td>
+      <td><button data-att="${p.id}" ${done?'disabled':''}>${done?'attested':'Attest'}</button></td></tr>`;
+  }).join('');
+  $('a-rows').querySelectorAll('[data-att]').forEach(b=>b.onclick=async()=>{
+    const {ok,body}=await post('/api/attest',{agency:ag,person:b.dataset.att});
+    S=body; show('a-result',ok,ok?`Attested.`:`Refused by the contract: ${body.error}`); paint();
+  });
+  $('a-log').innerHTML=S.log.map(l=>`<div><b>day ${l.period}</b><span class="${l.kind}">${l.text}</span></div>`).join('')||'<div class="empty">Nothing yet.</div>';
+}
+
+function openConsent(person,operator){
+  const o=S.operators.find(x=>x.id===operator);
+  $('m-site').textContent=o.label; $('m-kind').textContent=o.kind;
+  pending={person,operator}; $('overlay').classList.add('show');
+}
+$('m-deny').onclick=()=>{$('overlay').classList.remove('show');pending=null};
+$('m-approve').onclick=async()=>{
+  $('overlay').classList.remove('show');
+  const {ok,body}=await post('/api/prove',pending); S=body;
+  const target=role==='operator'?'o-result':'p-result';
+  ok?show(target,true,`Approved. The site received only this:`,body.pseudonym)
+    :show(target,false,`The site was told: not eligible.`,body.error);
+  pending=null; paint();
+};
+
+document.querySelectorAll('.role').forEach(r=>r.onclick=()=>{
+  document.querySelectorAll('.role').forEach(x=>x.classList.toggle('on',x===r));
+  role=r.dataset.role;
+  ['person','operator','agency'].forEach(v=>$('v-'+v).style.display=(v===role?'block':'none'));
+  paint();
+});
+$('p-who').onchange=paintPerson; $('o-who').onchange=paintOperator; $('a-who').onchange=paintAgency;
+$('btn-sim').onclick=()=>openConsent($('o-sim').value,$('o-who').value);
+$('btn-advance').onclick=async()=>{const{body}=await post('/api/advance');S=body;hide('p-result');paint()};
+$('btn-renew').onclick=async()=>{const{body}=await post('/api/renew');S=body;paint()};
+$('btn-skip').onclick=async()=>{const{body}=await post('/api/skip',{days:+$('skip-n').value});S=body;paint()};
+$('btn-reset').onclick=async()=>{const{body}=await post('/api/reset');S=body;tier=2;paint()};
+(async()=>{S=(await api('/api/state')).body;paint()})();
+</script></body></html>
