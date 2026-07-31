@@ -106,8 +106,22 @@ accepted up to one period of delay. With daily periods that's under 24 hours. Th
 delay falls on the *entry* side; getting back in is deliberately much slower.
 
 **3. An observer can tell which agencies attested a proof.**
-The membership check runs once per agency, so the pattern (say, DMV + passport) is
-visible. Not *who* — but in a small population, combined with timing, that leaks.
+Sharper than it first looks, and I owe the specifics to a reviewer on the Midnight
+forum. Each agency gets its own tree, and `checkRoot` is a ledger read, so the
+computed Merkle root has to be disclosed. One `proveEligibility` therefore writes
+three roots into the public transcript. For an agency you are enrolled with, the
+disclosed root matches a genuine historic root of that tree, which is already
+public on-chain. For one you are not, the witness hands back a dummy path and the
+root matches nothing. Anyone reading the transaction can compare the two and
+recover the exact attestation pattern. The 2-of-3 boolean stays inside the circuit;
+its inputs do not. Not *who* you are, but in a small population, combined with
+timing, that leaks.
+
+The fix is a redesign rather than a patch. Use one shared tree with the leaf as
+`hash(identityCommitment, period, issuerTag)`, prove two memberships against that
+single tree, and assert inside the circuit that the two issuer tags differ and both
+leaves belong to the same identity. Both disclosed roots are then just valid roots
+of the same tree and say nothing about who signed. Not implemented yet.
 
 **4. Anonymity is bounded by enrolment.** Three enrolled people means one-in-three.
 This matters at pilot scale and stops mattering at national scale.
