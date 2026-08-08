@@ -55,7 +55,10 @@ import CompactStandardLibrary;
 //     the same human. That means agencies keep a human -> commitment registry.
 //     Three agencies holding that is far better than ten thousand operators
 //     holding passport scans -- but it is not zero, and we do not pretend it is.
-//   * An observer can tell WHICH agencies attested a given proof (not who).
+//   * An observer USED to be able to tell which agencies attested a given proof.
+//     Fixed: one shared tree, the agency tag inside the leaf, and both
+//     membership checks asserted, so every proof that lands publishes the same
+//     two values. See README limit 3.
 //   * Anonymity is bounded by how many people are enrolled.
 //   * Passport data, names, and any court order live OFF-chain. On-chain there
 //     are only opaque hashes, counts, and the period.
@@ -74,7 +77,6 @@ export ledger issuerFederal: Bytes<32>;
 
 // ---- Attestation state ------------------------------------------------------
 
-// One tree per agency. Leaves are opaque; membership is proven in zero knowledge.
 // ONE tree, not one per agency.
 //
 // Per-agency trees leaked. checkRoot publishes its result, so three checkRoot
