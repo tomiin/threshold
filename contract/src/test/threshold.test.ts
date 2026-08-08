@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ThresholdSimulator, key, identityCommitment, pseudonymFor, nextPeriod,
-  TIER, TIER_PERIODS, REFLECTION_PERIODS,
+  attestationLeaf, TIER, TIER_PERIODS, REFLECTION_PERIODS,
 } from '../simulator.js';
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString('hex');
@@ -53,12 +53,12 @@ describe('eligibility: two of three agencies', () => {
   it('fails with only one agency', () => {
     const s = fresh();
     attestBy(s, ['dmv'], ALICE);
-    expect(() => s.as('alice').proveEligibility(CASINO)).toThrow(/not eligible/i);
+    expect(() => s.as('alice').proveEligibility(CASINO)).toThrow(/not attested by two agencies/i);
   });
 
   it('fails for someone never attested', () => {
     const s = fresh();
-    expect(() => s.as('outsider').proveEligibility(CASINO)).toThrow(/not eligible/i);
+    expect(() => s.as('outsider').proveEligibility(CASINO)).toThrow(/not attested by two agencies/i);
   });
 
   it('rejects attestation from a non-agency', () => {
@@ -92,7 +92,7 @@ describe('short-lived credentials', () => {
     expect(() => s.as('alice').proveEligibility(CASINO)).not.toThrow();
 
     s.as('registry').advancePeriod();
-    expect(() => s.as('alice').proveEligibility(CASINO)).toThrow(/not eligible/i);
+    expect(() => s.as('alice').proveEligibility(CASINO)).toThrow(/not attested by two agencies/i);
   });
 
   it('re-attestation in the new period restores eligibility', () => {
@@ -125,8 +125,8 @@ describe('self-exclusion', () => {
     expect(() => s.as('dmv').attest(identityCommitment(ALICE))).toThrow(/self-excluded/i);
 
     // So she holds no valid credential — at any operator.
-    expect(() => s.as('alice').proveEligibility(CASINO)).toThrow(/not eligible/i);
-    expect(() => s.as('alice').proveEligibility(ADULT)).toThrow(/not eligible/i);
+    expect(() => s.as('alice').proveEligibility(CASINO)).toThrow(/not attested by two agencies/i);
+    expect(() => s.as('alice').proveEligibility(ADULT)).toThrow(/not attested by two agencies/i);
   });
 
   it('does not affect anyone else', () => {
@@ -208,7 +208,67 @@ describe('operator-side lookup', () => {
     // Both simply fail to produce a proof; nothing distinguishes the reasons.
     s.as('alice').selfExclude(TIER.SIX_MONTHS);
     advance(s, 1);
-    expect(() => s.as('alice').proveEligibility(CASINO)).toThrow(/not eligible/i);
-    expect(() => s.as('outsider').proveEligibility(CASINO)).toThrow(/not eligible/i);
+    expect(() => s.as('alice').proveEligibility(CASINO)).toThrow(/not attested by two agencies/i);
+    expect(() => s.as('outsider').proveEligibility(CASINO)).toThrow(/not attested by two agencies/i);
+  });
+});
+
+// Regression tests for the two flaws the single-tree rewrite closes.
+//
+// 1. Disclosure. Three per-agency trees meant three checkRoot calls, and
+//    checkRoot publishes its result, so the transcript spelled out exactly
+//    which agencies had attested a caller. One shared tree with the agency in
+//    the leaf means both checks must pass, so every successful proof publishes
+//    the same two values.
+//
+// 2. Soundness. merkleTreePathRoot hashes the path's OWN leaf, and the witness
+//    runs on the prover's machine. Without binding the returned path to the
+//    leaf the circuit derived, anyone could present an attested person's path
+//    and be admitted having never been attested.
+//    See github.com/tomiin/merkle-leaf-binding-probe.
+describe('path binding', () => {
+  it('rejects a path belonging to a genuinely attested person', () => {
+    const s = fresh();
+    attestBy(s, ['dmv', 'passport'], ALICE);
+
+    // Mallory has no attestations. Her witness returns Alice's DMV path.
+    const l = s.getLedger();
+    const aliceDmvLeaf = attestationLeaf(identityCommitment(ALICE), l.period, l.issuerDmv);
+    s.register('mallory', key('mallory'), aliceDmvLeaf);
+
+    expect(() => s.as('mallory').proveEligibility(CASINO))
+      .toThrow(/does not match this holder/);
+  });
+
+  it('still admits the rightful holder', () => {
+    const s = fresh();
+    attestBy(s, ['dmv', 'passport'], ALICE);
+    expect(() => s.as('alice').proveEligibility(CASINO)).not.toThrow();
+  });
+});
+
+describe('failures are indistinguishable', () => {
+  // Whatever the reason a proof fails, it fails the same way. An operator
+  // watching rejections learns nothing about which case they are looking at.
+  it('reads identically for nobody, one agency, and self-excluded', () => {
+    const grab = (fn: () => void): string => {
+      try { fn(); return 'NO THROW'; } catch (e) { return (e as Error).message; }
+    };
+
+    const never = grab(() => fresh().as('outsider').proveEligibility(CASINO));
+
+    const s1 = fresh();
+    attestBy(s1, ['dmv'], ALICE);
+    const one = grab(() => s1.as('alice').proveEligibility(CASINO));
+
+    const s2 = fresh();
+    attestBy(s2, ['dmv', 'passport'], ALICE);
+    s2.as('alice').selfExclude(TIER.SIX_MONTHS);
+    advance(s2, 1);
+    const excluded = grab(() => s2.as('alice').proveEligibility(CASINO));
+
+    expect(one).toBe(never);
+    expect(excluded).toBe(never);
+    expect(never).toMatch(/not attested by two agencies/);
   });
 });

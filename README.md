@@ -105,23 +105,43 @@ every time, which would make all your visits linkable. We chose unlinkability an
 accepted up to one period of delay. With daily periods that's under 24 hours. The
 delay falls on the *entry* side; getting back in is deliberately much slower.
 
-**3. An observer can tell which agencies attested a proof.**
-Sharper than it first looks, and I owe the specifics to a reviewer on the Midnight
-forum. Each agency gets its own tree, and `checkRoot` is a ledger read, so the
-computed Merkle root has to be disclosed. One `proveEligibility` therefore writes
-three roots into the public transcript. For an agency you are enrolled with, the
-disclosed root matches a genuine historic root of that tree, which is already
-public on-chain. For one you are not, the witness hands back a dummy path and the
-root matches nothing. Anyone reading the transaction can compare the two and
-recover the exact attestation pattern. The 2-of-3 boolean stays inside the circuit;
-its inputs do not. Not *who* you are, but in a small population, combined with
-timing, that leaks.
+**3. An observer could tell which agencies attested a proof. FIXED.**
+Sharper than it first looked, and I owe the specifics to a reviewer on the
+Midnight forum. In the original design each agency had its own tree, and
+`checkRoot` is a ledger read, so the computed Merkle root had to be disclosed.
+One `proveEligibility` therefore wrote three roots into the public transcript.
+For an agency you were enrolled with, the disclosed root matched a genuine
+historic root of that tree, already public on-chain. For one you were not, the
+witness handed back a dummy path and the root matched nothing. Anyone reading the
+transaction could compare the two and recover the exact attestation pattern. The
+2-of-3 boolean stayed inside the circuit; its inputs did not. Not *who* you are,
+but in a small population, combined with timing, that leaks.
 
-The fix is a redesign rather than a patch. Use one shared tree with the leaf as
-`hash(identityCommitment, period, issuerTag)`, prove two memberships against that
-single tree, and assert inside the circuit that the two issuer tags differ and both
-leaves belong to the same identity. Both disclosed roots are then just valid roots
-of the same tree and say nothing about who signed. Not implemented yet.
+The fix was a redesign rather than a patch, and it has now landed. There is one
+shared tree. The leaf is `hash(identityCommitment, period, agencyTag)`, and only
+the attesting agency can produce its own tag, because `attest` tags with the
+caller's own derived id. A proof presents two memberships against that single
+tree and the circuit asserts the two agency tags differ. Both membership checks
+must pass, so both disclosed roots are ordinary roots of the same tree and both
+published booleans are `true` for every proof that lands. There is nothing left
+that varies between callers.
+
+While rewriting this I found a second and more serious problem in the same
+circuit. `merkleTreePathRoot` hashes the path's **own** leaf, and the witness
+that supplies the path runs on the prover's machine. The old code derived a leaf
+from the caller's key, passed it to the witness as a hint, and then used only the
+returned path — so a prover could return any attested person's path and be
+admitted having never been attested by anyone. That is a soundness break rather
+than a privacy leak: the contract admitted people it should have rejected. Both
+proofs now assert `path.leaf == leaf` before checking membership. The attack and
+the fix are demonstrated end to end at
+[merkle-leaf-binding-probe](https://github.com/tomiin/merkle-leaf-binding-probe);
+the binding costs 8 circuit rows and does not change `k`.
+
+Worth recording why this survived a test suite. There was already a test called
+*"fails for someone never attested"*, and it passed throughout. It used an honest
+witness. A test suite that only ever exercises honest witnesses cannot detect a
+witness-trust bug, whatever the test is named.
 
 **4. Anonymity is bounded by enrolment.** Three enrolled people means one-in-three.
 This matters at pilot scale and stops mattering at national scale.

@@ -75,9 +75,14 @@ export ledger issuerFederal: Bytes<32>;
 // ---- Attestation state ------------------------------------------------------
 
 // One tree per agency. Leaves are opaque; membership is proven in zero knowledge.
-export ledger dmvTree: HistoricMerkleTree<10, Bytes<32>>;
-export ledger passportTree: HistoricMerkleTree<10, Bytes<32>>;
-export ledger federalTree: HistoricMerkleTree<10, Bytes<32>>;
+// ONE tree, not one per agency.
+//
+// Per-agency trees leaked. checkRoot publishes its result, so three checkRoot
+// calls wrote three booleans into the public transcript and anyone could read
+// off exactly which agencies had attested a caller. With a single tree the leaf
+// carries the agency tag instead, both membership checks must pass, and every
+// caller whose transaction lands publishes the same two values.
+export ledger attestTree: HistoricMerkleTree<10, Bytes<32>>;
 
 // The current period. Mixed into every leaf, so last period's attestations are
 // worthless this period.
@@ -123,9 +128,12 @@ export pure circuit tierPeriods(tier: Uint<8>): Uint<64> {
 
 witness localSecretKey(): Bytes<32>;
 
-witness dmvPath(leaf: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
-witness passportPath(leaf: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
-witness federalPath(leaf: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
+// Two attestations, from two different agencies. The prover picks which two;
+// the circuit never learns or publishes which they were.
+witness attestorA(): Bytes<32>;
+witness attestorB(): Bytes<32>;
+witness attestPathA(leaf: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
+witness attestPathB(leaf: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
 
 // ---- Identity derivation (domain-separated throughout) ----------------------
 
@@ -137,9 +145,13 @@ export pure circuit issuerId(sk: Bytes<32>): Bytes<32> {
   return persistentHash<Vector<2, Bytes<32>>>([pad(32, "thr:v1:issuer"), sk]);
 }
 
-// The leaf an agency inserts: identity bound to the period it was attested in.
-export pure circuit attestationLeaf(idc: Bytes<32>, p: Bytes<32>): Bytes<32> {
-  return persistentHash<Vector<3, Bytes<32>>>([pad(32, "thr:v1:leaf"), idc, p]);
+// The leaf an agency inserts: identity, bound to the period it was attested in
+// AND to the agency that attested it. The agency tag lives in the leaf rather
+// than in a separate tree, which is what lets three trees collapse into one.
+// Only that agency can produce it, because `attest` tags with the caller's own
+// derived id.
+export pure circuit attestationLeaf(idc: Bytes<32>, p: Bytes<32>, agency: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<4, Bytes<32>>>([pad(32, "thr:v2:leaf"), idc, p, agency]);
 }
 
 // What a given verifier sees. Unique per verifier, so operators cannot collude.
@@ -197,19 +209,22 @@ export circuit attest(idc: Bytes<32>): [] {
       "Threshold: reinstatement is still within the reflection window");
   }
 
-  const leaf = attestationLeaf(who, period);
+  // Each comparison is evaluated unconditionally and disclosed on its own.
+  // Writing this as `a || b || c` inside one disclose() does not compile: `||`
+  // short-circuits, so the second and third ledger reads would happen only when
+  // the earlier ones were false, and a ledger read inside a branch conditioned
+  // on a witness-derived boolean is a disclosure the compiler will not infer for
+  // you. Nothing extra leaks here in any case, since an agency calling attest is
+  // not anonymous.
+  const isDmv = disclose(callerId == issuerDmv);
+  const isPassport = disclose(callerId == issuerPassport);
+  const isFederal = disclose(callerId == issuerFederal);
+  assert(isDmv || isPassport || isFederal,
+    "Threshold: caller is not a registered agency");
 
-  if (disclose(callerId == issuerDmv)) {
-    dmvTree.insert(disclose(leaf));
-  } else {
-    if (disclose(callerId == issuerPassport)) {
-      passportTree.insert(disclose(leaf));
-    } else {
-      assert(disclose(callerId == issuerFederal),
-        "Threshold: caller is not a registered agency");
-      federalTree.insert(disclose(leaf));
-    }
-  }
+  // Tagged with the caller's own derived id, so an agency cannot attest under
+  // another agency's name.
+  attestTree.insert(disclose(attestationLeaf(who, period, callerId)));
   attestationCount.increment(1);
 }
 
@@ -246,16 +261,24 @@ export circuit requestReinstatement(): [] {
 
 // ---- Eligibility proof (what an operator relies on) -------------------------
 
-circuit dmvAttests(leaf: Bytes<32>): Boolean {
-  return dmvTree.checkRoot(disclose(merkleTreePathRoot<10, Bytes<32>>(dmvPath(leaf))));
-}
-
-circuit passportAttests(leaf: Bytes<32>): Boolean {
-  return passportTree.checkRoot(disclose(merkleTreePathRoot<10, Bytes<32>>(passportPath(leaf))));
-}
-
-circuit federalAttests(leaf: Bytes<32>): Boolean {
-  return federalTree.checkRoot(disclose(merkleTreePathRoot<10, Bytes<32>>(federalPath(leaf))));
+// One membership proof against the shared tree.
+//
+// Two asserts, and both are load-bearing.
+//
+// The first binds the witness-supplied path to the leaf this circuit derived.
+// merkleTreePathRoot hashes the path's OWN leaf, and the witness runs on the
+// prover's machine, so without this a prover could return any attested person's
+// path and be admitted having never been attested at all. Demonstrated end to
+// end at github.com/tomiin/merkle-leaf-binding-probe.
+//
+// The second is asserted, never returned as a Boolean for the caller to branch
+// on. checkRoot publishes its result, so a value that varies between callers is
+// a value an observer can read. Requiring it to be true makes it constant: every
+// transaction that lands publishes true, twice.
+circuit provePresence(leaf: Bytes<32>, path: MerkleTreePath<10, Bytes<32>>): [] {
+  assert(path.leaf == leaf, "Threshold: attestation path does not match this holder");
+  assert(attestTree.checkRoot(disclose(merkleTreePathRoot<10, Bytes<32>>(path))),
+    "Threshold: not attested by two agencies for the current period");
 }
 
 // Prove eligibility to an operator.
@@ -266,14 +289,21 @@ circuit federalAttests(leaf: Bytes<32>): Boolean {
 // not whether anyone was ever excluded.
 export circuit proveEligibility(verifierId: Bytes<32>): Bytes<32> {
   const sk = localSecretKey();
-  const leaf = attestationLeaf(identityCommitment(sk), period);
+  const idc = identityCommitment(sk);
 
-  const dmvOk = dmvAttests(leaf);
-  const passportOk = passportAttests(leaf);
-  const federalOk = federalAttests(leaf);
+  // The prover names two agencies privately. Distinctness is enforced in-circuit,
+  // so the same attestation cannot be presented twice to fake a second agency.
+  const agencyA = attestorA();
+  const agencyB = attestorB();
+  assert(agencyA != agencyB, "Threshold: both attestations name the same agency");
 
-  assert((dmvOk && passportOk) || (dmvOk && federalOk) || (passportOk && federalOk),
-    "Threshold: not eligible for the current period");
+  const leafA = attestationLeaf(idc, period, agencyA);
+  const leafB = attestationLeaf(idc, period, agencyB);
+
+  // Identical failure message on both, so a rejection does not say which of the
+  // two was missing.
+  provePresence(leafA, attestPathA(leafA));
+  provePresence(leafB, attestPathB(leafB));
 
   const pseudonym = disclose(pseudonymFor(sk, verifierId));
   if (!verifiedPseudonyms.member(pseudonym)) {

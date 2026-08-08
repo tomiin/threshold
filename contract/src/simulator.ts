@@ -23,8 +23,8 @@ export const deployerCoinPublicKey = utils.toHexPadded('registry');
 // Off-chain mirrors of the contract's pure circuits.
 export const identityCommitment = (sk: Uint8Array): Uint8Array => pureCircuits.identityCommitment(sk);
 export const issuerId = (sk: Uint8Array): Uint8Array => pureCircuits.issuerId(sk);
-export const attestationLeaf = (idc: Uint8Array, p: Uint8Array): Uint8Array =>
-  pureCircuits.attestationLeaf(idc, p);
+export const attestationLeaf = (idc: Uint8Array, p: Uint8Array, agency: Uint8Array): Uint8Array =>
+  pureCircuits.attestationLeaf(idc, p, agency);
 export const pseudonymFor = (sk: Uint8Array, verifierId: Uint8Array): Uint8Array =>
   pureCircuits.pseudonymFor(sk, verifierId);
 export const nextPeriod = (p: Uint8Array): Uint8Array => pureCircuits.nextPeriod(p);
@@ -79,8 +79,8 @@ export class ThresholdSimulator {
     return sim;
   }
 
-  register(name: string, secretKey: Uint8Array): void {
-    this.userPrivateStates[name] = createPrivateState(secretKey);
+  register(name: string, secretKey: Uint8Array, forgePathForLeaf?: Uint8Array): void {
+    this.userPrivateStates[name] = createPrivateState(secretKey, forgePathForLeaf);
   }
 
   as(name: string): ThresholdSimulator {
